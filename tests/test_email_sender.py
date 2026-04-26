@@ -13,6 +13,7 @@ from empire.exceptions import (
     EmailLogPersistFailed,
     MissingTrackingContext,
     ResendKeyMissing,
+    UnverifiedUIClaim,
 )
 
 
@@ -178,3 +179,121 @@ def test_reply_to_passed_through(monkeypatch):
         )
     assert captured["resend_body"]["reply_to"] == "rahul@example.com"
     supabase_creds.reset_cache()
+
+
+def test_ui_claim_lint_blocks_send(monkeypatch, tmp_path):
+    """Hard-stop when html body references a UI surface not in the frontend.
+
+    Regression: 2026-04-26 incident — autonomous email pointed customer at
+    a non-existent "Profile page". Linter prevents the send entirely (not
+    just warns), so no resend.com call should fire.
+    """
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+
+    # Synthetic Next.js frontend: only Settings exists, no Profile.
+    app_dir = tmp_path / "src" / "app" / "settings"
+    app_dir.mkdir(parents=True)
+    (app_dir / "page.tsx").write_text("<h1>Settings</h1>")
+
+    fired: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        fired.append(url)
+        return _mock_resp(200, {"id": "should_not_happen"})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        with pytest.raises(UnverifiedUIClaim) as exc_info:
+            send_email_tracked(
+                to="x@example.com",
+                subject="s",
+                html="<p>Update it on the Profile page.</p>",
+                user_id="u", profile_person_key="k",
+                frontend_root=tmp_path,
+            )
+
+    assert "Profile" in exc_info.value.unverified
+    assert fired == [], (
+        "send_email_tracked called Resend even though the UI claim linter "
+        "should have hard-stopped first."
+    )
+
+
+def test_ui_claim_lint_passes_clean_copy(monkeypatch, tmp_path):
+    supabase_creds.reset_cache()
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("SUPABASE_URL", "https://abc.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_k")
+
+    app_dir = tmp_path / "src" / "app" / "settings"
+    app_dir.mkdir(parents=True)
+    (app_dir / "page.tsx").write_text("<h1>Settings</h1>")
+
+    def fake_post(url, **_kwargs):
+        if "resend.com" in url:
+            return _mock_resp(200, {"id": "rsnd_ok"})
+        return _mock_resp(201, {})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        result = send_email_tracked(
+            to="x@example.com",
+            subject="s",
+            html="<p>Open Settings to update your delivery time.</p>",
+            user_id="u", profile_person_key="k",
+            frontend_root=tmp_path,
+        )
+
+    assert result["id"] == "rsnd_ok"
+    supabase_creds.reset_cache()
+
+
+def test_ui_claim_lint_skipped_when_no_frontend_root(monkeypatch):
+    """Default behaviour: no frontend_root and no env var -> no lint, send fires."""
+    supabase_creds.reset_cache()
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("SUPABASE_URL", "https://abc.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_k")
+    monkeypatch.delenv("EMPIRE_FRONTEND_ROOT", raising=False)
+
+    def fake_post(url, **_kwargs):
+        if "resend.com" in url:
+            return _mock_resp(200, {"id": "rsnd_unchecked"})
+        return _mock_resp(201, {})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        result = send_email_tracked(
+            to="x@example.com",
+            subject="s",
+            html="<p>Update on the Profile page (no lint -> fine).</p>",
+            user_id="u", profile_person_key="k",
+        )
+
+    assert result["id"] == "rsnd_unchecked"
+    supabase_creds.reset_cache()
+
+
+def test_ui_claim_lint_uses_env_var(monkeypatch, tmp_path):
+    """EMPIRE_FRONTEND_ROOT picks up the lint without explicit kwarg."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+
+    app_dir = tmp_path / "src" / "app" / "settings"
+    app_dir.mkdir(parents=True)
+    (app_dir / "page.tsx").write_text("<h1>Settings</h1>")
+
+    monkeypatch.setenv("EMPIRE_FRONTEND_ROOT", str(tmp_path))
+
+    fired: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        fired.append(url)
+        return _mock_resp(200, {"id": "x"})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        with pytest.raises(UnverifiedUIClaim):
+            send_email_tracked(
+                to="x@example.com",
+                subject="s",
+                html="<p>Open the Profile page</p>",
+                user_id="u", profile_person_key="k",
+            )
+
+    assert fired == []

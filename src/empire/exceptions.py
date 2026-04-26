@@ -83,6 +83,31 @@ class EmailLogPersistFailed(EmpireLibError):
         )
 
 
+# --- Outbound copy / UI claims ---
+
+
+class UnverifiedUIClaim(EmpireLibError):
+    """Raised by empire.lint.ui_claims when outbound copy mentions a UI surface
+    (page, button, setting) that does not exist in the live frontend.
+
+    Reason: 2026-04-26 incident — an apology email pointed a real customer at
+    a "Profile page" that did not and never did exist. He hunted, found
+    nothing, DM'd Rahul. Schema support (a `birth_hour` column existing) is
+    NOT proof of UI support. Memory rules are advice for interactive sessions;
+    this guard is the code-level enforcement so autonomous agents (drip
+    emails, support replies, contribution emails, inbox bots) can't ship the
+    same hallucination.
+    """
+
+    def __init__(self, unverified: list[str]):
+        self.unverified = list(unverified)
+        super().__init__(
+            "outbound copy references UI surfaces not found in the frontend: "
+            + ", ".join(self.unverified)
+            + ". Either add the surface to the frontend or rewrite the copy."
+        )
+
+
 # --- Test guards ---
 
 

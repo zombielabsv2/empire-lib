@@ -5,11 +5,18 @@ known subscriber must produce an email_log row keyed by resend_id, otherwise
 the engagement webhook silently drops opens/clicks. This module makes the
 pairing the *only* code path; calling without user_id/profile_person_key
 raises MissingTrackingContext.
+
+Empire rule (feedback_no_fabricated_ui_surfaces.md): every send may pass an
+optional `frontend_root` to lint the HTML body for fabricated UI references
+("update it on the Profile page" when no Profile page exists). When the path
+is provided (or EMPIRE_FRONTEND_ROOT env var is set), the send hard-aborts
+with UnverifiedUIClaim before hitting Resend.
 """
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -19,7 +26,9 @@ from empire.exceptions import (
     MissingTrackingContext,
     ResendKeyMissing,
     SupabaseCredsNotFound,
+    UnverifiedUIClaim,
 )
+from empire.lint.ui_claims import lint_outbound_copy
 
 RESEND_URL = "https://api.resend.com/emails"
 DEFAULT_FROM = "noreply@rxjapps.in"
@@ -94,15 +103,24 @@ def send_email_tracked(
     profile_person_key: str,
     from_email: str = DEFAULT_FROM,
     reply_to: str | None = None,
+    frontend_root: str | Path | None = None,
 ) -> dict:
     """Send a Resend email and write the paired email_log row.
 
     All args after `*` are required kwargs. Calling with positional args or
     missing user_id / profile_person_key raises MissingTrackingContext.
 
+    `frontend_root` (or env var EMPIRE_FRONTEND_ROOT) enables the UI-claim
+    linter — the html body is checked against the live frontend's real UI
+    surfaces and the send aborts with UnverifiedUIClaim if any reference
+    can't be resolved. Pass the project's Next.js / Streamlit / static-HTML
+    root. Omit (and leave the env var unset) to skip the check.
+
     Returns the Resend JSON response (contains the `id` field).
     Raises:
     - MissingTrackingContext if user_id or profile_person_key is empty.
+    - UnverifiedUIClaim if the html body references UI surfaces that don't
+      exist in the resolved frontend.
     - ResendKeyMissing if RESEND_API_KEY is unset.
     - httpx.HTTPStatusError on Resend non-2xx.
     - EmailLogPersistFailed if the email_log insert fails (send already happened).
@@ -114,6 +132,16 @@ def send_email_tracked(
         )
     if not to:
         raise MissingTrackingContext("send_email_tracked requires non-empty `to`.")
+
+    # UI-claim lint: hard-stop on any unverified surface reference. Resolved
+    # in this order: explicit kwarg > env var > skip. The env-var path lets a
+    # whole project opt in once at startup without threading kwargs through
+    # every call site.
+    resolved_root = frontend_root or os.environ.get("EMPIRE_FRONTEND_ROOT")
+    if resolved_root:
+        lint = lint_outbound_copy(html, Path(resolved_root))
+        if not lint.ok:
+            raise UnverifiedUIClaim(lint.unverified)
 
     api_key = _resolve_resend_key()
 
