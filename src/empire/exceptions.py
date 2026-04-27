@@ -17,6 +17,21 @@ class SupabaseCredsNotFound(EmpireLibError):
     """Raised when Supabase URL+key cannot be resolved from env or st.secrets."""
 
 
+class GCSCredsNotFound(EmpireLibError):
+    """Raised when GCS credentials cannot be resolved (no GCP_SA_KEY env, no ADC)."""
+
+
+class DataBlobNotFound(EmpireLibError):
+    """Raised by get_csv when the requested data_key has no row in data_store."""
+
+
+class DataBlobChecksumMismatch(EmpireLibError):
+    """Raised when GCS body SHA does not match content_sha in the pointer row.
+
+    Indicates corruption or a partial write. Caller should retry or alert.
+    """
+
+
 class MissingEnvVars(EmpireLibError):
     """Raised when required environment variables are not set.
 

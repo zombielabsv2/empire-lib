@@ -9,8 +9,11 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from empire.exceptions import (
+    DataBlobChecksumMismatch,
+    DataBlobNotFound,
     EmailLogPersistFailed,
     EmpireLibError,
+    GCSCredsNotFound,
     LiveAPIBlocked,
     MissingEnvVars,
     MissingTelemetryContext,
@@ -24,6 +27,9 @@ __all__ = [
     "__version__",
     "EmpireLibError",
     "SupabaseCredsNotFound",
+    "GCSCredsNotFound",
+    "DataBlobNotFound",
+    "DataBlobChecksumMismatch",
     "MissingEnvVars",
     "OpusModelBlocked",
     "MissingTelemetryContext",
