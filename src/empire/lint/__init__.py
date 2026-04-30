@@ -20,6 +20,11 @@ from empire.lint.copy_guards import (
     format_report,
     has_blocking,
 )
+from empire.lint.json_shape import (
+    ShapeViolation,
+    assert_shape,
+    validate_shape,
+)
 from empire.lint.ui_claims import (
     LintResult,
     discover_ui_surfaces,
@@ -32,7 +37,9 @@ __all__ = [
     "CONTEXT_KBK_CURTAIN",
     "CONTEXT_KBK_REEL",
     "LintResult",
+    "ShapeViolation",
     "Violation",
+    "assert_shape",
     "check_ai_writing",
     "check_all",
     "check_kbk_curtain",
@@ -43,4 +50,5 @@ __all__ = [
     "format_report",
     "has_blocking",
     "lint_outbound_copy",
+    "validate_shape",
 ]
