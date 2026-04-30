@@ -10,6 +10,7 @@ from empire.config import supabase_creds
 from empire.email import sender
 from empire.email.sender import send_email_tracked
 from empire.exceptions import (
+    CopyGuardViolation,
     EmailLogPersistFailed,
     MissingTrackingContext,
     ResendKeyMissing,
@@ -297,3 +298,113 @@ def test_ui_claim_lint_uses_env_var(monkeypatch, tmp_path):
             )
 
     assert fired == []
+
+
+# ── copy_guard_context wiring ─────────────────────────────────────────────
+
+
+def test_copy_guard_blocks_kbk_reel_with_sanganer(monkeypatch):
+    """A KBK reel-context send referencing Sanganer must hard-stop pre-Resend."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+
+    fired: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        fired.append(url)
+        return _mock_resp(200, {"id": "x"})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        with pytest.raises(CopyGuardViolation):
+            send_email_tracked(
+                to="x@example.com",
+                subject="s",
+                html="<p>Block-printed in Sanganer for 100 years</p>",
+                user_id="u",
+                profile_person_key="k",
+                copy_guard_context="kbk_reel",
+            )
+
+    assert fired == []
+
+
+def test_copy_guard_blocks_kbk_curtain_natural_dye(monkeypatch):
+    """A KBK curtain-context send claiming natural dye must hard-stop."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+
+    fired: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        fired.append(url)
+        return _mock_resp(200, {"id": "x"})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        with pytest.raises(CopyGuardViolation):
+            send_email_tracked(
+                to="x@example.com",
+                subject="s",
+                html="<p>Hand-printed with natural dye from Rajasthan</p>",
+                user_id="u",
+                profile_person_key="k",
+                copy_guard_context="kbk_curtain",
+            )
+
+    assert fired == []
+
+
+def test_copy_guard_skipped_when_context_omitted(monkeypatch):
+    """Without copy_guard_context, Sanganer copy still ships (back-compat)."""
+    supabase_creds.reset_cache()
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("SUPABASE_URL", "https://abc.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_k")
+
+    posts: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        posts.append(url)
+        if "resend.com" in url:
+            return _mock_resp(200, {"id": "rsnd_x"})
+        return _mock_resp(201, {})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        result = send_email_tracked(
+            to="x@example.com",
+            subject="s",
+            html="<p>Block-printed in Sanganer</p>",
+            user_id="u",
+            profile_person_key="k",
+        )
+
+    assert result["id"] == "rsnd_x"
+    supabase_creds.reset_cache()
+
+
+def test_copy_guard_warn_only_does_not_block(monkeypatch, capsys):
+    """AI-writing tells (warn-level) print to stderr but don't stop the send."""
+    supabase_creds.reset_cache()
+    monkeypatch.setenv("RESEND_API_KEY", "re_test")
+    monkeypatch.setenv("SUPABASE_URL", "https://abc.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_k")
+
+    posts: list[str] = []
+
+    def fake_post(url, **_kwargs):
+        posts.append(url)
+        if "resend.com" in url:
+            return _mock_resp(200, {"id": "rsnd_x"})
+        return _mock_resp(201, {})
+
+    with patch.object(sender.httpx, "post", side_effect=fake_post):
+        result = send_email_tracked(
+            to="x@example.com",
+            subject="s",
+            html="<p>This is groundbreaking - a transformative work of insight</p>",
+            user_id="u",
+            profile_person_key="k",
+            copy_guard_context="general",
+        )
+
+    assert result["id"] == "rsnd_x"
+    captured = capsys.readouterr()
+    assert "copy guard warn" in captured.err
+    supabase_creds.reset_cache()

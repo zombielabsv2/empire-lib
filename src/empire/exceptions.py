@@ -123,6 +123,27 @@ class UnverifiedUIClaim(EmpireLibError):
         )
 
 
+class CopyGuardViolation(EmpireLibError):
+    """Raised by empire.lint.copy_guards when outbound copy violates a
+    block-severity rule (Sanganer in KBK overlay, natural-dye claim on
+    curtains, Opus on API outside the documented exception, etc).
+
+    Reason: feedback_memory_rules_need_code_guards.md — memories are advice;
+    autopilots don't read them. This exception turns the load-bearing copy
+    rules into runtime checks. See empire.lint.copy_guards for the catalog.
+    """
+
+    def __init__(self, violations):
+        # Imported lazily to avoid circular ref.
+        from empire.lint.copy_guards import format_report
+
+        self.violations = list(violations)
+        super().__init__(
+            "outbound copy violated block-severity guard(s):\n"
+            + format_report(self.violations)
+        )
+
+
 # --- Test guards ---
 
 

@@ -22,12 +22,14 @@ import httpx
 
 from empire.config.supabase_creds import get_supabase_creds
 from empire.exceptions import (
+    CopyGuardViolation,
     EmailLogPersistFailed,
     MissingTrackingContext,
     ResendKeyMissing,
     SupabaseCredsNotFound,
     UnverifiedUIClaim,
 )
+from empire.lint.copy_guards import check_all, has_blocking
 from empire.lint.ui_claims import lint_outbound_copy
 
 RESEND_URL = "https://api.resend.com/emails"
@@ -104,6 +106,7 @@ def send_email_tracked(
     from_email: str = DEFAULT_FROM,
     reply_to: str | None = None,
     frontend_root: str | Path | None = None,
+    copy_guard_context: str | None = None,
 ) -> dict:
     """Send a Resend email and write the paired email_log row.
 
@@ -116,11 +119,18 @@ def send_email_tracked(
     can't be resolved. Pass the project's Next.js / Streamlit / static-HTML
     root. Omit (and leave the env var unset) to skip the check.
 
+    `copy_guard_context` (e.g. "kbk_reel", "kbk_curtain", "general") opts
+    the send into the copy_guards catalog. Block-severity violations
+    (Sanganer in a KBK reel, "natural-dye" on a curtain product page, etc)
+    raise CopyGuardViolation. Warn-level violations (AI-writing tells)
+    print to stderr but do not block. Omit to skip these checks.
+
     Returns the Resend JSON response (contains the `id` field).
     Raises:
     - MissingTrackingContext if user_id or profile_person_key is empty.
     - UnverifiedUIClaim if the html body references UI surfaces that don't
       exist in the resolved frontend.
+    - CopyGuardViolation if a block-severity copy guard fires.
     - ResendKeyMissing if RESEND_API_KEY is unset.
     - httpx.HTTPStatusError on Resend non-2xx.
     - EmailLogPersistFailed if the email_log insert fails (send already happened).
@@ -142,6 +152,20 @@ def send_email_tracked(
         lint = lint_outbound_copy(html, Path(resolved_root))
         if not lint.ok:
             raise UnverifiedUIClaim(lint.unverified)
+
+    # Copy guards: optional domain-specific rule check. Block-severity
+    # violations (Sanganer, natural-dye claim, etc) hard-stop the send;
+    # warn-level (AI-writing tells) print to stderr but don't block.
+    if copy_guard_context:
+        violations = check_all(html, context=copy_guard_context)
+        if has_blocking(violations):
+            raise CopyGuardViolation(violations)
+        for v in violations:
+            print(
+                f"[empire.email] copy guard warn: {v.guard}: {v.rule} "
+                f"-- snippet=...{v.snippet.strip()}...",
+                file=sys.stderr,
+            )
 
     api_key = _resolve_resend_key()
 
