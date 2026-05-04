@@ -169,6 +169,18 @@ def send_email_tracked(
 
     api_key = _resolve_resend_key()
 
+    # Guard: any From: address whose mailbox doesn't actually receive mail
+    # creates a reply-bounce trap (recipient hits Reply, mailer-daemon
+    # rejects). Auto-default reply_to to a real inbox so this never
+    # happens. Patterns matched: noreply@, no-reply@, watch@, alerts@,
+    # notifications@, empire@, digest@, support@ on rxjapps.in domains.
+    if not reply_to:
+        lowered = (from_email or "").lower()
+        TRAP_PREFIXES = ("noreply@", "no-reply@", "watch@", "alerts@",
+                         "notifications@", "empire@", "digest@", "support@")
+        if any(p in lowered for p in TRAP_PREFIXES):
+            reply_to = "jindal.rahul@gmail.com"
+
     body: dict = {
         "from": from_email,
         "to": to,
