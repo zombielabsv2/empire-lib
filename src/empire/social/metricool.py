@@ -209,7 +209,12 @@ class MetricoolClient:
             "autoPublish": bool(autopublish),
             "draft": bool(draft),
             "shortener": False,
-            "saveExternalMediaFiles": False,
+            # True = Metricool copies the media onto its own CDN at schedule
+            # time. Required: brand pipelines stage media to the transient GCS
+            # bucket (rxj-metricool-staging, 2-day lifecycle), so a post
+            # scheduled further out than 2 days would otherwise publish a
+            # dead image link. With this True the post is self-contained.
+            "saveExternalMediaFiles": True,
             "hasNotReadNotes": False,
         }
         body.update(self._network_data(networks, post_type, autopublish,
