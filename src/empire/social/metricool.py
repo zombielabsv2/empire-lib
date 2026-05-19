@@ -276,6 +276,26 @@ class MetricoolClient:
         self._request("DELETE", f"/v2/scheduler/posts/{post_id}",
                       params={"blogId": blog_id})
 
+    def list_posts(self, blog_id: int | str,
+                   start: datetime | str, end: datetime | str) -> list[dict]:
+        """List scheduled + published posts for a brand in a datetime window.
+
+        `start`/`end` are naive datetimes (or 'YYYY-MM-DDTHH:MM:SS' strings),
+        interpreted in the brand's own timezone. Each post dict carries the
+        same shape as `get_post`, including `providers[].status` (PENDING /
+        PUBLISHED / ERROR) — handy for spotting posts that failed to publish.
+        """
+        def _fmt(v: datetime | str) -> str:
+            return v if isinstance(v, str) else v.strftime("%Y-%m-%dT%H:%M:%S")
+
+        data = self._request(
+            "GET", "/v2/scheduler/posts",
+            params={"blogId": blog_id, "start": _fmt(start), "end": _fmt(end)},
+        )
+        if isinstance(data, dict):
+            return data.get("data", [])
+        return data if isinstance(data, list) else []
+
 
 __all__ = [
     "MetricoolClient",
