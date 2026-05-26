@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import httpx
@@ -155,6 +155,26 @@ class MetricoolClient:
         raise MetricoolError(f"normalize_media returned no URL: {data!r}")
 
     # -- scheduling ----------------------------------------------------------
+    @staticmethod
+    def _guard_future(publish_at: datetime, timezone: str,
+                      buffer_minutes: int = 10) -> datetime:
+        """Return a publish time guaranteed not to be in the past.
+
+        `publish_at` is a naive local datetime interpreted in `timezone`.
+        If it is at or before "now" in that same timezone, return now + buffer;
+        otherwise return it unchanged. This keeps a late-approved post from
+        being rejected by Metricool for having a past publicationDate.
+        """
+        try:
+            from zoneinfo import ZoneInfo
+            now_local = datetime.now(ZoneInfo(timezone)).replace(tzinfo=None)
+        except Exception:
+            now_local = datetime.now()
+        pa = publish_at.replace(tzinfo=None) if publish_at.tzinfo else publish_at
+        if pa <= now_local:
+            return now_local + timedelta(minutes=buffer_minutes)
+        return pa
+
     def schedule_post(
         self,
         *,
@@ -195,6 +215,13 @@ class MetricoolClient:
         media = list(media or [])
         if normalize and media:
             media = [self.normalize_media(m, blog_id) for m in media]
+
+        # Metricool rejects a publicationDate in the past, which is how an
+        # approval that lands after the originally-scheduled slot silently
+        # fails (e.g. a post slated for 8:08 AM but approved at 1:10 PM — the
+        # "Mom Box" failure). Bump any past time forward to now + buffer in the
+        # target timezone so a late approval still ships instead of erroring.
+        publish_at = self._guard_future(publish_at, timezone)
 
         body: dict[str, Any] = {
             "publicationDate": {

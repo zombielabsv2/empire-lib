@@ -55,3 +55,25 @@ def test_scheduled_post_result_defaults():
     r = ScheduledPostResult(ok=True, post_id="42")
     assert r.ok and r.post_id == "42"
     assert r.networks == [] and r.raw == {}
+
+
+def test_guard_future_bumps_past_time():
+    """A publish time in the past is bumped forward (the late-approval fix)."""
+    from datetime import datetime, timedelta
+    past = datetime(2020, 1, 1, 8, 8, 0)
+    out = MetricoolClient._guard_future(past, "Asia/Kolkata")
+    assert out > datetime.now() - timedelta(minutes=1)
+
+
+def test_guard_future_preserves_future_time():
+    from datetime import datetime, timedelta
+    fut = datetime.now() + timedelta(days=3)
+    out = MetricoolClient._guard_future(fut, "Asia/Kolkata")
+    assert abs((out - fut).total_seconds()) < 1
+
+
+def test_guard_future_bad_timezone_falls_back():
+    from datetime import datetime, timedelta
+    past = datetime(2020, 1, 1, 8, 8, 0)
+    out = MetricoolClient._guard_future(past, "Not/AZone")
+    assert out > datetime.now() - timedelta(minutes=1)
