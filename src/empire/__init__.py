@@ -14,6 +14,7 @@ from empire.exceptions import (
     EmailLogPersistFailed,
     EmpireLibError,
     GCSCredsNotFound,
+    IssueRepoNotPrivate,
     LiveAPIBlocked,
     MissingEnvVars,
     MissingTelemetryContext,
@@ -37,4 +38,5 @@ __all__ = [
     "MissingTrackingContext",
     "EmailLogPersistFailed",
     "LiveAPIBlocked",
+    "IssueRepoNotPrivate",
 ]

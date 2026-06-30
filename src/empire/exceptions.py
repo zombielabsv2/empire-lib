@@ -144,6 +144,36 @@ class CopyGuardViolation(EmpireLibError):
         )
 
 
+# --- GitHub issue filing ---
+
+
+class IssueRepoNotPrivate(EmpireLibError):
+    """Raised by empire.github_guard when code tries to file a GitHub issue
+    into a repo that is not PRIVATE (public, internal, or undeterminable).
+
+    Reason: 2026-07-01 incident — the cost-report anomaly engine auto-filed
+    "Bug: AstroMedha morning_briefing running 4x expected API calls" issues
+    (embedding Rahul's name, script names, Supabase/Cloud Run internals, and
+    gcloud remediation commands) into zombielabsv2/empire-dashboard while that
+    repo was PUBLIC. A scraper Q&A blog copied issue #36, Google indexed it,
+    and it surfaced in a search for "astromedha.in rahul jindal" months after
+    the repo was made private. Auto-filed bug issues are infra disclosure; the
+    filer must verify the target repo is private before writing, and fail
+    CLOSED when visibility can't be confirmed. See
+    incident_empire_dashboard_public_issue_leak.md.
+    """
+
+    def __init__(self, repo: str, visibility: str):
+        self.repo = repo
+        self.visibility = visibility
+        super().__init__(
+            f"refusing to file issue into {repo}: visibility is {visibility!r}, "
+            f"not PRIVATE. Auto-filed bug issues disclose infra internals + "
+            f"personal names and get scraped/indexed if the repo is ever public. "
+            f"File into a private repo, or strip the internal detail first."
+        )
+
+
 # --- Test guards ---
 
 
