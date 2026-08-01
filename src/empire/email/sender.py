@@ -29,6 +29,7 @@ from empire.exceptions import (
     SupabaseCredsNotFound,
     UnverifiedUIClaim,
 )
+from empire.email.mobile import assert_phone_safe
 from empire.lint.copy_guards import check_all, has_blocking
 from empire.lint.ui_claims import lint_outbound_copy
 
@@ -107,6 +108,7 @@ def send_email_tracked(
     reply_to: str | None = None,
     frontend_root: str | Path | None = None,
     copy_guard_context: str | None = None,
+    allow_overflow_risks: bool = False,
 ) -> dict:
     """Send a Resend email and write the paired email_log row.
 
@@ -124,6 +126,13 @@ def send_email_tracked(
     (Sanganer in a KBK reel, "natural-dye" on a curtain product page, etc)
     raise CopyGuardViolation. Warn-level violations (AI-writing tells)
     print to stderr but do not block. Omit to skip these checks.
+
+    Every send is checked for phone-safety first and raises EmailNotPhoneSafe
+    if the HTML would clip on a 360px screen — fixed widths, a missing
+    viewport, a wide data table, a long nowrap run, a duplicate style attr.
+    This sender bypasses the resend-send edge function by design, so nothing
+    downstream will fix the HTML for it. Pass allow_overflow_risks=True only
+    when the overflow is deliberate and the recipient reads on desktop.
 
     Returns the Resend JSON response (contains the `id` field).
     Raises:
@@ -166,6 +175,16 @@ def send_email_tracked(
                 f"-- snippet=...{v.snippet.strip()}...",
                 file=sys.stderr,
             )
+
+    # Phone-safety guard. This sender posts straight to api.resend.com on
+    # purpose (it is the one path that survives a resend-send edge-function
+    # outage), which means it never gets that function's mobile-safe rewrite.
+    # So detect here instead: an email that would clip on a phone fails on the
+    # author, not on the reader. Detection only — the author's HTML is never
+    # rewritten. (2026-08-02: a hand-built email went out through this path
+    # with no phone check of any kind behind it.)
+    if not allow_overflow_risks:
+        assert_phone_safe(html)
 
     api_key = _resolve_resend_key()
 
