@@ -1,10 +1,36 @@
-"""Resend sender with mandatory email_log pairing.
+"""Resend sender. Tracking pairing is INTENDED but does not currently work.
 
 Empire rule (feedback_resend_must_pair_email_log.md): every send to a
 known subscriber must produce an email_log row keyed by resend_id, otherwise
 the engagement webhook silently drops opens/clicks. This module makes the
 pairing the *only* code path; calling without user_id/profile_person_key
 raises MissingTrackingContext.
+
+READ THIS BEFORE RELYING ON THE ABOVE (verified 2026-08-02 against the live
+DB via information_schema + pg_indexes on project ejvavmpieilvigjktugh):
+the email_log row is NEVER actually written. `_insert_email_log` targets a
+table that belongs to AstroMedha's daily-guidance mailer, not a generic email
+log, and it rejects our row for four independent reasons:
+
+  1. `recipient` column does not exist                       -> 42703
+  2. `subject` column does not exist                         -> 42703
+  3. `guidance_date` is NOT NULL, no default, never supplied -> 23502
+  4. `user_id` is a uuid; we type it `str`                   -> 22P02
+
+Any one of these kills the insert, so the send always ends in
+EmailLogPersistFailed *after* the mail has already gone out. The
+"supabase creds not found" message you are most likely to see is only the
+FIRST gate and masks all four. Do not read it as cosmetic.
+
+So: **if you need open/click tracking, you have to build it first.** Do not
+assume this module gives it to you. Do NOT fix it by adding recipient/subject
+columns either — you would also have to drop the `guidance_date` NOT NULL
+constraint, and that constraint is load-bearing for the mailer that actually
+owns the table. The real fix is a separate table owned by empire-lib, with
+the engagement webhook reading both. That is deliberately not built: as of
+2026-08-02 this sender had no live production caller (checked by grepping
+`from empire.email import` across the local tree only), so the table would
+have served nobody. Build it when a real consumer needs tracking, not before.
 
 Empire rule (feedback_no_fabricated_ui_surfaces.md): every send may pass an
 optional `frontend_root` to lint the HTML body for fabricated UI references
@@ -58,8 +84,13 @@ def _insert_email_log(
     """Insert a row into Supabase email_log keyed by resend_id.
 
     Raises EmailLogPersistFailed on any failure so the operator knows the
-    send happened but tracking is now lost. Caller decides whether to
-    backfill or accept the gap.
+    send happened but tracking is now lost.
+
+    NOTE: this insert cannot currently succeed — the row shape below does not
+    match the live table (four independent blockers, see module docstring), so
+    "accept the gap" is the only available option and backfilling by hand is
+    not one. Kept as-is rather than quietly deleted: the intent is right and
+    the loud failure is more honest than silently sending untracked mail.
     """
     try:
         url, key = get_supabase_creds()
@@ -110,7 +141,8 @@ def send_email_tracked(
     copy_guard_context: str | None = None,
     allow_overflow_risks: bool = False,
 ) -> dict:
-    """Send a Resend email and write the paired email_log row.
+    """Send a Resend email. Attempts the paired email_log row, which currently
+    always fails — see the module docstring. The email itself does send.
 
     All args after `*` are required kwargs. Calling with positional args or
     missing user_id / profile_person_key raises MissingTrackingContext.
